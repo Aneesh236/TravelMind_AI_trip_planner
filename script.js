@@ -46,6 +46,250 @@ function clearError() {
     errorMessage.classList.remove("show");
 }
 
+// Remove Markdown symbols from the AI response before displaying it.
+function cleanWebMarkdown(text) {
+    return text
+        .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+        .replace(/^>\s*/, "")
+        .replace(/^#{1,6}\s*/, "")
+        .replace(/(\*\*|__)(.*?)\1/g, "$2")
+        .replace(/[*_~`#]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+// Create safe HTML elements without inserting the AI response as raw HTML.
+function makeWebElement(tagName, className, text) {
+    const element = document.createElement(tagName);
+    if (className) {
+        element.className = className;
+    }
+    if (text !== undefined) {
+        element.textContent = text;
+    }
+    return element;
+}
+
+function getWebSectionTheme(text) {
+    const lowerText = text.toLowerCase();
+
+    if (/stay|hotel|accommodation/.test(lowerText)) return "stay";
+    if (/food|restaurant|dining|cuisine|meal/.test(lowerText)) return "food";
+    if (/transport|getting around|travel tips/.test(lowerText)) return "transport";
+    if (/pack|what to bring/.test(lowerText)) return "packing";
+    if (/budget|cost|expense/.test(lowerText)) return "budget";
+    if (/tip|note|important|know before/.test(lowerText)) return "tips";
+
+    return "general";
+}
+
+function isWebSectionHeading(text) {
+    return /^(trip overview|overview|highlights|recommended stay areas?|where to stay|accommodation|hotels?|food and dining|food recommendations?|restaurants?|transport|getting around|packing list|what to pack|estimated budget|budget breakdown|travel tips?|important tips?|things to know|know before you go)\b/i.test(
+        text
+    );
+}
+
+function addWebContentCard(container, text, options = {}) {
+    const card = makeWebElement(
+        "article",
+        options.number ? "screen-tip-card" : "screen-activity-card"
+    );
+
+    if (options.number) {
+        card.appendChild(
+            makeWebElement("span", "screen-tip-number", options.number)
+        );
+    }
+
+    const content = makeWebElement("div", "screen-card-copy");
+    const labelledText = text.match(/^([^:]{2,65}):\s*(.+)$/);
+
+    if (labelledText) {
+        content.appendChild(
+            makeWebElement("strong", "screen-activity-title", labelledText[1])
+        );
+        content.appendChild(makeWebElement("p", "", labelledText[2]));
+    } else {
+        content.appendChild(makeWebElement("p", "", text));
+    }
+
+    card.appendChild(content);
+    container.appendChild(card);
+}
+
+// Turn the plain AI text into a travel-magazine layout on the webpage.
+function renderWebItinerary(itinerary, trip) {
+    itineraryText.replaceChildren();
+
+    const cover = makeWebElement("section", "screen-itinerary-cover");
+    const coverCopy = makeWebElement("div", "screen-cover-copy");
+    coverCopy.appendChild(
+        makeWebElement("span", "screen-cover-kicker", "YOUR PERSONALISED ESCAPE")
+    );
+    coverCopy.appendChild(
+        makeWebElement("h3", "", cleanWebMarkdown(trip.destination))
+    );
+    coverCopy.appendChild(
+        makeWebElement(
+            "p",
+            "",
+            `${trip.days}-day journey designed around you`
+        )
+    );
+    cover.appendChild(coverCopy);
+    itineraryText.appendChild(cover);
+
+    const summary = makeWebElement("section", "screen-trip-summary");
+    [
+        ["Duration", `${trip.days} days`],
+        ["Traveller", trip.traveller],
+        ["Budget", trip.budget],
+        ["Interests", trip.interests.join(", ")]
+    ].forEach(([label, value]) => {
+        const summaryCard = makeWebElement("article", "screen-summary-card");
+        summaryCard.appendChild(makeWebElement("span", "", label));
+        summaryCard.appendChild(makeWebElement("strong", "", value));
+        summary.appendChild(summaryCard);
+    });
+    itineraryText.appendChild(summary);
+
+    const body = makeWebElement("div", "screen-itinerary-body");
+    itineraryText.appendChild(body);
+
+    let currentContainer = body;
+    let currentDayBody = null;
+    let addedOverviewHeading = false;
+
+    itinerary.split(/\r?\n/).forEach((rawLine) => {
+        const trimmedLine = rawLine.trim();
+        if (!trimmedLine) return;
+
+        const bulletMatch = trimmedLine.match(/^[-*+•]\s+(.+)/);
+        const numberedMatch = trimmedLine.match(/^(\d+)[.)]\s+(.+)/);
+        const content = cleanWebMarkdown(
+            bulletMatch
+                ? bulletMatch[1]
+                : numberedMatch
+                  ? numberedMatch[2]
+                  : trimmedLine
+        );
+
+        if (!content) return;
+
+        // The designed cover and summary already show these repeated title lines.
+        if (
+            /\b\d+\s*[- ]day\s+(?:travel\s+)?itinerary\b/i.test(content) ||
+            (/budget\s*:/i.test(content) &&
+                /travell?er\s*:/i.test(content) &&
+                /interest/i.test(content))
+        ) {
+            return;
+        }
+
+        const dayMatch = content.match(/^day\s*(\d+)\s*:?\s*(.*)$/i);
+        if (dayMatch) {
+            const daySection = makeWebElement("section", "screen-day");
+            const dayHeading = makeWebElement("header", "screen-day-heading");
+            dayHeading.appendChild(
+                makeWebElement("span", "screen-day-number", `DAY ${dayMatch[1]}`)
+            );
+            dayHeading.appendChild(
+                makeWebElement(
+                    "h3",
+                    "",
+                    dayMatch[2] || `Explore ${trip.destination}`
+                )
+            );
+            daySection.appendChild(dayHeading);
+            currentDayBody = makeWebElement("div", "screen-day-body");
+            daySection.appendChild(currentDayBody);
+            body.appendChild(daySection);
+            currentContainer = currentDayBody;
+            return;
+        }
+
+        const timeMatch = content.match(
+            /^(morning|afternoon|evening|night)(?:\s+plan)?\s*:?\s*(.*)$/i
+        );
+        if (timeMatch && currentDayBody) {
+            const timeBlock = makeWebElement("section", "screen-time-block");
+            const timeName =
+                timeMatch[1].charAt(0).toUpperCase() +
+                timeMatch[1].slice(1).toLowerCase();
+            timeBlock.appendChild(
+                makeWebElement("h4", "screen-time-heading", timeName)
+            );
+            const timeContent = makeWebElement("div", "screen-time-content");
+            timeBlock.appendChild(timeContent);
+            currentDayBody.appendChild(timeBlock);
+            currentContainer = timeContent;
+
+            if (timeMatch[2]) {
+                addWebContentCard(currentContainer, timeMatch[2]);
+            }
+            return;
+        }
+
+        if (isWebSectionHeading(content)) {
+            const headingParts = content.match(/^([^:]+):\s*(.*)$/);
+            const headingText = headingParts ? headingParts[1] : content;
+            const inlineText = headingParts ? headingParts[2] : "";
+            const theme = getWebSectionTheme(headingText);
+            const section = makeWebElement(
+                "section",
+                `screen-section theme-${theme}`
+            );
+            section.appendChild(
+                makeWebElement("h3", "screen-section-heading", headingText)
+            );
+            const sectionContent = makeWebElement(
+                "div",
+                "screen-section-content"
+            );
+            section.appendChild(sectionContent);
+            body.appendChild(section);
+            currentContainer = sectionContent;
+            currentDayBody = null;
+
+            if (inlineText) {
+                addWebContentCard(currentContainer, inlineText);
+            }
+            return;
+        }
+
+        if (!addedOverviewHeading && !currentDayBody && currentContainer === body) {
+            const overview = makeWebElement(
+                "section",
+                "screen-section theme-general"
+            );
+            overview.appendChild(
+                makeWebElement(
+                    "h3",
+                    "screen-section-heading",
+                    "Your trip at a glance"
+                )
+            );
+            const overviewContent = makeWebElement(
+                "div",
+                "screen-section-content"
+            );
+            overview.appendChild(overviewContent);
+            body.appendChild(overview);
+            currentContainer = overviewContent;
+            addedOverviewHeading = true;
+        }
+
+        if (numberedMatch) {
+            addWebContentCard(currentContainer, content, {
+                number: numberedMatch[1]
+            });
+        } else {
+            addWebContentCard(currentContainer, content);
+        }
+    });
+}
+
 // Run when the user submits the planner form.
 plannerForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -95,9 +339,9 @@ plannerForm.addEventListener("submit", async (event) => {
         }
 
         resultTitle.textContent = destination;
-        itineraryText.textContent = data.itinerary;
         latestTrip = tripDetails;
         latestItinerary = data.itinerary;
+        renderWebItinerary(data.itinerary, tripDetails);
 
         emptyResult.classList.add("hidden");
         resultCard.classList.remove("hidden");
