@@ -10,10 +10,17 @@ const resultCard = document.getElementById("resultCard");
 const resultTitle = document.getElementById("resultTitle");
 const itineraryText = document.getElementById("itineraryText");
 const pdfButton = document.getElementById("pdfButton");
+const plannerLoading = document.getElementById("plannerLoading");
+const loadingDestination = document.getElementById("loadingDestination");
+const loadingStatus = document.getElementById("loadingStatus");
+const loadingSteps = Array.from(
+    document.querySelectorAll(".loading-steps span")
+);
 
 let selectedBudget = "Medium";
 let latestTrip = null;
 let latestItinerary = "";
+let loadingMessageTimer = null;
 
 // Allow the user to select one budget.
 document.querySelectorAll(".budget-option").forEach((button) => {
@@ -44,6 +51,59 @@ function showError(message) {
 function clearError() {
     errorMessage.textContent = "";
     errorMessage.classList.remove("show");
+}
+
+function showPlannerLoading(destination) {
+    const loadingMessages = [
+        "Finding the best local experiences…",
+        "Balancing sights, food and travel time…",
+        "Organising your days into a smooth route…",
+        "Adding personalised recommendations…",
+        "Giving your itinerary the finishing touches…"
+    ];
+    let messageIndex = 0;
+
+    loadingDestination.textContent = destination;
+    loadingStatus.textContent = loadingMessages[messageIndex];
+    loadingSteps.forEach((step, index) => {
+        step.classList.toggle("active", index === 0);
+        step.classList.remove("complete");
+    });
+
+    plannerLoading.classList.add("show");
+    plannerLoading.setAttribute("aria-hidden", "false");
+    document.body.classList.add("planning");
+    generateButton.classList.add("is-loading");
+    generateButton.textContent = "Planning your journey";
+
+    window.clearInterval(loadingMessageTimer);
+    loadingMessageTimer = window.setInterval(() => {
+        messageIndex = (messageIndex + 1) % loadingMessages.length;
+        loadingStatus.classList.add("changing");
+
+        window.setTimeout(() => {
+            loadingStatus.textContent = loadingMessages[messageIndex];
+            loadingStatus.classList.remove("changing");
+        }, 180);
+
+        const activeStep = Math.min(
+            Math.floor(messageIndex / 2),
+            loadingSteps.length - 1
+        );
+        loadingSteps.forEach((step, index) => {
+            step.classList.toggle("active", index === activeStep);
+            step.classList.toggle("complete", index < activeStep);
+        });
+    }, 1800);
+}
+
+function hidePlannerLoading() {
+    window.clearInterval(loadingMessageTimer);
+    loadingMessageTimer = null;
+    plannerLoading.classList.remove("show");
+    plannerLoading.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("planning");
+    generateButton.classList.remove("is-loading");
 }
 
 // Remove Markdown symbols from the AI response before displaying it.
@@ -321,7 +381,7 @@ plannerForm.addEventListener("submit", async (event) => {
     };
 
     generateButton.disabled = true;
-    generateButton.textContent = "Creating your itinerary...";
+    showPlannerLoading(destination);
 
     try {
         const response = await fetch("/api/plan", {
@@ -353,6 +413,7 @@ plannerForm.addEventListener("submit", async (event) => {
     } catch (error) {
         showError(error.message);
     } finally {
+        hidePlannerLoading();
         generateButton.disabled = false;
         generateButton.textContent = "✦ Create my itinerary";
     }
